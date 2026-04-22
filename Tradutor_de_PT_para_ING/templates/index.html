@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8" />
+    <title>Legenda em Tempo Real</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: black;
+            color: white;
+            font-family: Arial, sans-serif;
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #output {
+            font-size: 3.5rem;
+            text-align: center;
+            max-width: 90%;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div id="output">A aguardar áudio...</div>
+
+    <script>
+        const output = document.getElementById('output');
+        let paused = false;
+
+        const evtSource = new EventSource('/stream');
+
+        evtSource.onmessage = function(event) {
+            if (paused) return;
+
+            const lines = event.data.split("<br>").filter(line => line.trim() !== "");
+            const lastLine = lines.slice(-3).join("<br>");
+            output.innerHTML = lastLine;
+        };
+
+        evtSource.onerror = function() {
+            console.error("Erro na conexão SSE.");
+            evtSource.close();
+        };
+
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+
+            if (key === 'p') {
+                paused = true;
+                fetch('/toggle_pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: "pause" })
+                }).then(res => res.json()).then(data => {
+                    console.log("⏸️ Pausado:", data.status);
+                });
+
+            } else if (key === 'r') {
+                paused = false;
+                fetch('/toggle_pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: "resume" })
+                }).then(res => res.json()).then(data => {
+                    console.log("▶️ Retomado:", data.status);
+                });
+
+            } else if (key === 'c') {
+                output.innerHTML = "";
+                fetch('/clear', {
+                    method: 'POST'
+                }).then(res => res.json()).then(data => {
+                    console.log("🧹 Limpeza:", data.status);
+                });
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!document.fullscreenElement && e.target.id !== 'output') {
+                document.documentElement.requestFullscreen().catch(console.error);
+            }
+        });
+    </script>
+</body>
+</html>

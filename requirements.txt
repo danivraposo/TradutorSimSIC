@@ -1,0 +1,6 @@
+flask
+numpy
+pyaudio
+torch
+openai-whisper
+deep-translator
