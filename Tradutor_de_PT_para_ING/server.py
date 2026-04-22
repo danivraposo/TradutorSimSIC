@@ -33,7 +33,7 @@ def configure_ffmpeg_path():
         if default_windows_dir.exists():
             ffmpeg_dir = str(default_windows_dir)
 
-    # Adiciona ao PATH do sistema se o diretório foi encontrado
+    # Adiciona ao PATH do sistema se o diretório for encontrado
     if ffmpeg_dir and Path(ffmpeg_dir).exists():
         os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
@@ -52,7 +52,7 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", default_model)
 
 def load_whisper_model():
     """
-    Carrega o modelo Whisper na memória, tentando usar GPU se disponível.
+    Carrega o modelo Whisper na memória, tentando usar GPU se estiver disponível.
     """
     requested_device = WHISPER_DEVICE
     try:
@@ -78,7 +78,7 @@ model, ACTIVE_DEVICE = load_whisper_model()
 # Filas para comunicação entre threads
 translated_queue = queue.Queue(maxsize=100)
 translation_history = []
-pause_translations = False  # Estado de pausa controlado pela UI
+pause_translations = False  # Estado de pausa controlado pela interface (UI)
 
 # Configurações de Áudio (PyAudio)
 FORMAT = pyaudio.paInt16
@@ -181,7 +181,7 @@ def audio_capture_loop():
                     frames = []
         except Exception as e:
             print(f"Erro na captura de áudio: {e}")
-            print("A tentar reiniciar captura em 2 segundos...")
+            print("A tentar reiniciar a captura em 2 segundos...")
             time.sleep(2)
         finally:
             # Garante que os recursos de áudio são libertados em caso de erro
@@ -214,7 +214,7 @@ def audio_processing_loop():
 
         try:
             print("A processar fala...")
-            # Converte bytes para array numpy float32 compatível com Whisper
+            # Converte bytes para array numpy float32 compatível com o Whisper
             audio_int16 = np.frombuffer(b"".join(frames), dtype=np.int16)
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
@@ -228,7 +228,7 @@ def audio_processing_loop():
             )
             text = result["text"].strip()
 
-            # Validações básicas para evitar repetições e lixo
+            # Validações básicas para evitar repetições e alucinações
             if not text or is_similar(text, last_transcribed) or is_banned(text):
                 continue
 
@@ -301,7 +301,7 @@ def clear_translations():
 # --- Inicialização ---
 
 if __name__ == "__main__":
-    # Inicia as threads de captura e processamento em segundo plano
+    # Inicia as threads de captura e processamento em segundo plano (background)
     threading.Thread(target=audio_capture_loop, daemon=True).start()
     threading.Thread(target=audio_processing_loop, daemon=True).start()
 
@@ -314,4 +314,5 @@ if __name__ == "__main__":
     
     # Inicia o servidor Flask
     app.run(debug=False, threaded=True, host="0.0.0.0", port=5000)
+
 
