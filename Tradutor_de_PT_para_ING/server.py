@@ -88,6 +88,13 @@ CHUNK = 1024
 SILENCE_THRESHOLD = 300  # Limiar de volume para detetar silêncio
 SILENCE_SECONDS = 0.9    # Tempo de silêncio para fechar um segmento
 MAX_SEGMENT_SECONDS = 3.0 # Duração máxima de um segmento de áudio
+PROCESSING_DELAY_SECONDS = float(os.getenv("PROCESSING_DELAY_SECONDS", "0.4"))
+MIN_AUDIO_SECONDS = float(os.getenv("MIN_AUDIO_SECONDS", "0.4"))
+SEGMENT_RMS_THRESHOLD = float(os.getenv("SEGMENT_RMS_THRESHOLD", "140"))
+NO_SPEECH_PROB_THRESHOLD = float(os.getenv("NO_SPEECH_PROB_THRESHOLD", "0.9"))
+AVG_LOGPROB_THRESHOLD = float(os.getenv("AVG_LOGPROB_THRESHOLD", "-1.0"))
+COMPRESSION_RATIO_THRESHOLD = float(os.getenv("COMPRESSION_RATIO_THRESHOLD", "2.2"))
+MIN_TEXT_CHARS = int(os.getenv("MIN_TEXT_CHARS", "3"))
 
 # Fila para blocos de áudio capturados
 audio_frames_queue = queue.Queue(maxsize=8)
@@ -108,6 +115,38 @@ def is_banned(text):
 def is_similar(a, b):
     """Compara dois textos ignorando espaços e maiúsculas/minúsculas."""
     return a.strip().lower() == b.strip().lower()
+
+def is_low_value_text(text):
+    stripped = text.strip()
+    if len(stripped) < MIN_TEXT_CHARS:
+        return True
+    if not any(ch.isalpha() for ch in stripped):
+        return True
+    compact = stripped.replace(" ", "")
+    if compact and len(set(compact)) == 1:
+        return True
+    return False
+
+def segment_rms(audio_int16):
+    if audio_int16.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(audio_int16.astype(np.float64) ** 2)))
+
+def segments_quality_ok(segments):
+    if not segments:
+        return True
+
+    max_no_speech = max(seg.get("no_speech_prob", 0) for seg in segments)
+    min_avg_logprob = min(seg.get("avg_logprob", 0) for seg in segments)
+    max_compression_ratio = max(seg.get("compression_ratio", 0) for seg in segments)
+
+    if max_no_speech >= NO_SPEECH_PROB_THRESHOLD:
+        return False
+    if min_avg_logprob <= AVG_LOGPROB_THRESHOLD:
+        return False
+    if max_compression_ratio >= COMPRESSION_RATIO_THRESHOLD:
+        return False
+    return True
 
 def queue_put_with_drop(q, item):
     """Adiciona um item à fila. Se estiver cheia, remove o mais antigo."""
@@ -213,10 +252,19 @@ def audio_processing_loop():
             continue
 
         try:
+            if PROCESSING_DELAY_SECONDS > 0:
+                time.sleep(PROCESSING_DELAY_SECONDS)
             print("A processar fala...")
             # Converte bytes para array numpy float32 compatível com o Whisper
             audio_int16 = np.frombuffer(b"".join(frames), dtype=np.int16)
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
+            audio_duration = audio_int16.size / RATE
+            if audio_duration < MIN_AUDIO_SECONDS:
+                continue
+
+            if segment_rms(audio_int16) < SEGMENT_RMS_THRESHOLD:
+                continue
 
             # Transcrição via Whisper
             result = model.transcribe(
@@ -225,11 +273,18 @@ def audio_processing_loop():
                 fp16=(ACTIVE_DEVICE == "cuda"),
                 temperature=0.0,
                 condition_on_previous_text=False,
+                no_speech_threshold=NO_SPEECH_PROB_THRESHOLD,
+                logprob_threshold=AVG_LOGPROB_THRESHOLD,
+                compression_ratio_threshold=COMPRESSION_RATIO_THRESHOLD,
             )
+            segments = result.get("segments", [])
+            if not segments_quality_ok(segments):
+                continue
+
             text = result["text"].strip()
 
             # Validações básicas para evitar repetições e alucinações
-            if not text or is_similar(text, last_transcribed) or is_banned(text):
+            if is_low_value_text(text) or is_similar(text, last_transcribed) or is_banned(text):
                 continue
 
             last_transcribed = text
@@ -283,10 +338,12 @@ def toggle_pause():
     
     if action == "pause":
         pause_translations = True
+        print("Legendas pausadas pelo utilizador.")
         return jsonify({"status": "paused"})
     
     elif action == "resume":
         pause_translations = False
+        print("Legendas retomadas pelo utilizador.")
         return jsonify({"status": "resumed"})
     
     return jsonify({"status": "invalid action"}), 400
@@ -296,6 +353,7 @@ def clear_translations():
     """Limpa o histórico de legendas exibido."""
     global translation_history
     translation_history.clear()
+    print("Historico de legendas limpo pelo utilizador.")
     return jsonify({"status": "cleared"})
 
 # --- Inicialização ---
